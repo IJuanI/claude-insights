@@ -44,6 +44,18 @@ Real-time panel for tracking Claude Code background agents (sidechain tasks).
 - **Smart scrolling** — auto-scrolls to bottom for running tasks, locks when you scroll up; Start/End navigation buttons appear on hover
 - **Debug mode** — toggle via command palette or `claudeUsageBar.debugMode` setting for development
 
+### Session browser
+
+A native tree view for browsing all Claude Code sessions across every workspace.
+
+- **Workspace > Session > Agent hierarchy** — browse all workspaces, their sessions (with display names matching Claude Code), and background agents nested under each session
+- **Cross-workspace visibility** — see sessions from all projects, not just the current workspace; current workspace is listed first
+- **Quick search** — filter the tree by session name, ID, or agent status via the search icon in the view title
+- **Deep content search** — search through the actual content of session messages and agent outputs across all workspaces (command palette: "Claude Sessions: Deep Search")
+- **Live status** — running agents show a spinner icon; completed agents show a checkmark
+- **Copy IDs** — right-click any session or agent to copy its ID to clipboard
+- **Auto-refresh** — tree updates every 10 seconds to reflect new sessions and agent status changes
+
 ## What's shown
 
 | Metric | Description |

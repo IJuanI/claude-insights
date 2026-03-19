@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as os from 'os';
 import {
   readCredentials,
   refreshToken,
@@ -15,6 +16,7 @@ import {
 import { getWebviewHtml } from './webview';
 import { evaluateWarnings, freshWarningState } from './warnings';
 import { AgentPanelProvider } from './agentPanel';
+import { SessionTreeProvider, deepSearch } from './sessionTree';
 
 const BACKOFF_429_MS = 5 * 60_000;
 
@@ -354,6 +356,104 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeUsageBar.openAgents', () => {
       agentProvider.openInEditor();
+    })
+  );
+
+  // ── Session tree ─────────────────────────────────────────────
+  const sessionTree = new SessionTreeProvider();
+  const treeView = vscode.window.createTreeView('claudeUsageBar.sessionTree', {
+    treeDataProvider: sessionTree,
+    showCollapseAll: true,
+  });
+  sessionTree.setTreeView(treeView);
+  context.subscriptions.push(treeView);
+  context.subscriptions.push({ dispose: () => sessionTree.dispose() });
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeUsageBar.searchSessions', async () => {
+      const query = await vscode.window.showInputBox({
+        placeHolder: 'Search sessions and agents...',
+        prompt: 'Filter the session tree by name, ID, or status',
+      });
+      if (query !== undefined) {
+        sessionTree.search(query);
+        vscode.commands.executeCommand('setContext', 'claudeUsageBar.sessionSearchActive', !!query);
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeUsageBar.clearSessionSearch', () => {
+      sessionTree.clearSearch();
+      vscode.commands.executeCommand('setContext', 'claudeUsageBar.sessionSearchActive', false);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeUsageBar.refreshSessions', () => {
+      sessionTree.refresh();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeUsageBar.deepSearch', async () => {
+      const query = await vscode.window.showInputBox({
+        placeHolder: 'Search through session content...',
+        prompt: 'Deep search across all session messages and agent outputs',
+      });
+      if (!query) return;
+
+      const results = deepSearch(query);
+      if (results.length === 0) {
+        vscode.window.showInformationMessage(`No results for "${query}"`);
+        return;
+      }
+
+      const items = results.map(r => {
+        const icon = r.type === 'agent' ? '$(symbol-event)' : '$(comment-discussion)';
+        const loc = r.wsPath.replace(os.homedir(), '~');
+        return {
+          label: `${icon} ${r.type === 'agent' ? r.agentDescription : r.sessionName}`,
+          description: loc,
+          detail: r.matchContext,
+          result: r,
+        };
+      });
+
+      const picked = await vscode.window.showQuickPick(items, {
+        placeHolder: `${results.length} result${results.length !== 1 ? 's' : ''} for "${query}"`,
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+
+      if (picked) {
+        // Copy session/agent ID and show in tree
+        const r = picked.result;
+        const id = r.type === 'agent' ? r.agentId! : r.sessionId;
+        sessionTree.search(id);
+        vscode.commands.executeCommand('setContext', 'claudeUsageBar.sessionSearchActive', true);
+        await vscode.commands.executeCommand('claudeUsageBar.sessionTree.focus');
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeUsageBar.copySessionId', (item: unknown) => {
+      if (item && typeof item === 'object' && 'meta' in item) {
+        const meta = (item as { meta: { sessionId: string } }).meta;
+        vscode.env.clipboard.writeText(meta.sessionId);
+        vscode.window.showInformationMessage('Session ID copied');
+      }
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudeUsageBar.copyAgentId', (item: unknown) => {
+      if (item && typeof item === 'object' && 'meta' in item) {
+        const meta = (item as { meta: { agentId: string } }).meta;
+        vscode.env.clipboard.writeText(meta.agentId);
+        vscode.window.showInformationMessage('Agent ID copied');
+      }
     })
   );
 

@@ -9,7 +9,7 @@
     "type": "git",
     "url": "https://github.com/IJuanI/claude-usage-bar"
   },
-  "version": "0.4.0",
+  "version": "0.5.0",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -45,6 +45,33 @@
           "light": "media/agents-icon-light.svg",
           "dark": "media/agents-icon.svg"
         }
+      },
+      {
+        "command": "claudeUsageBar.searchSessions",
+        "title": "Claude Sessions: Search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "claudeUsageBar.clearSessionSearch",
+        "title": "Claude Sessions: Clear Search",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "claudeUsageBar.refreshSessions",
+        "title": "Claude Sessions: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeUsageBar.deepSearch",
+        "title": "Claude Sessions: Deep Search (content)"
+      },
+      {
+        "command": "claudeUsageBar.copySessionId",
+        "title": "Copy Session ID"
+      },
+      {
+        "command": "claudeUsageBar.copyAgentId",
+        "title": "Copy Agent ID"
       }
     ],
     "menus": {
@@ -54,10 +81,43 @@
           "when": "claudeUsageBar.hasBackgroundAgents && activeWebviewPanelId == claudeVSCodePanel",
           "group": "navigation"
         }
+      ],
+      "view/title": [
+        {
+          "command": "claudeUsageBar.searchSessions",
+          "when": "view == claudeUsageBar.sessionTree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeUsageBar.clearSessionSearch",
+          "when": "view == claudeUsageBar.sessionTree && claudeUsageBar.sessionSearchActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "claudeUsageBar.refreshSessions",
+          "when": "view == claudeUsageBar.sessionTree",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeUsageBar.copySessionId",
+          "when": "viewItem == session",
+          "group": "inline"
+        },
+        {
+          "command": "claudeUsageBar.copyAgentId",
+          "when": "viewItem == agent",
+          "group": "inline"
+        }
       ]
     },
     "views": {
       "claude-sessions-sidebar": [
+        {
+          "id": "claudeUsageBar.sessionTree",
+          "name": "Sessions"
+        },
         {
           "type": "webview",
           "id": "claudeUsageBar.agentView",
