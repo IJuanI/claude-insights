@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-insights",
+  "name": "claude-code-insights-vscode",
   "publisher": "ijuani",
   "displayName": "Claude Code Insights",
   "description": "Real-time insights for Claude Code: usage and rate limits, background agent monitoring, conversation viewer, session browser, and permission approvals",

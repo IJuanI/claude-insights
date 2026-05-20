@@ -18,7 +18,7 @@ A VS Code companion for [Claude Code](https://claude.ai/code). See your usage, w
 
 ## Install
 
-1. Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=ijuani.claude-code-insights) (or `code --install-extension ijuani.claude-code-insights`).
+1. Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=ijuani.claude-code-insights-vscode) (or `code --install-extension ijuani.claude-code-insights-vscode`).
 2. Sign into Claude Code on the same machine — the extension reuses your existing OAuth token (Keychain on macOS, `~/.claude/.credentials.json` elsewhere).
 3. Open any folder. Usage appears in the status bar within seconds; the **Claude Sessions** Activity Bar icon hosts the Session tree, Claude Lens, and Usage panels.
 

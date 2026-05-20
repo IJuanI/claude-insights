@@ -155,7 +155,7 @@ export class DiagnosticLog {
 
     return {
       meta: {
-        extensionVersion: vscode.extensions.getExtension('claude-code-insights')?.packageJSON?.version ?? 'unknown',
+        extensionVersion: vscode.extensions.getExtension('ijuani.claude-code-insights-vscode')?.packageJSON?.version ?? 'unknown',
         vscodeVersion: vscode.version,
         os: `${os.type()} ${os.release()} ${os.arch()}`,
         uptime: Math.floor((Date.now() - this.startTime) / 1000),
