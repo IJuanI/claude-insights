@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateWarnings, freshWarningState } from './warnings';
+import { evaluateWarnings, evaluateContextBloat, freshWarningState } from './warnings';
 import { UsageData } from './rateLimits';
 
 const HOUR = 3_600_000;
@@ -241,6 +241,46 @@ describe('evaluateWarnings', () => {
 
       expect(warned.sessionHotCount).toBe(2);
       expect(warned.weeklyUnderuseCount).toBe(2);
+    });
+  });
+
+  describe('evaluateContextBloat', () => {
+    it('returns null when avgCacheRead is below threshold', () => {
+      const now = Date.now();
+      const warned = freshWarningState(now);
+      const result = evaluateContextBloat(200_000, 'session-1', warned, now);
+      expect(result).toBeNull();
+      expect(warned.contextBloatCount).toBe(0);
+    });
+
+    it('returns null when avgCacheRead equals threshold', () => {
+      const now = Date.now();
+      const warned = freshWarningState(now);
+      const result = evaluateContextBloat(300_000, 'session-1', warned, now);
+      expect(result).toBeNull();
+    });
+
+    it('fires warning when avgCacheRead exceeds 300K', () => {
+      const now = Date.now();
+      const warned = freshWarningState(now);
+      const result = evaluateContextBloat(350_000, 'session-1', warned, now);
+      expect(result).not.toBeNull();
+      expect(result!.level).toBe('warning');
+      expect(result!.message).toContain('350K');
+      expect(result!.message).toContain('tokens/msg avg');
+      expect(warned.contextBloatCount).toBe(1);
+    });
+
+    it('fires at most 3 times (startup, +1h, +2h)', () => {
+      const now = Date.now();
+      const warned = freshWarningState(now);
+
+      expect(evaluateContextBloat(400_000, 'sid', warned, now)).not.toBeNull();
+      expect(evaluateContextBloat(400_000, 'sid', warned, now)).toBeNull(); // too soon
+      expect(evaluateContextBloat(400_000, 'sid', warned, now + HOUR)).not.toBeNull();
+      expect(evaluateContextBloat(400_000, 'sid', warned, now + 2 * HOUR)).not.toBeNull();
+      expect(evaluateContextBloat(400_000, 'sid', warned, now + 3 * HOUR)).toBeNull(); // maxed out
+      expect(warned.contextBloatCount).toBe(3);
     });
   });
 

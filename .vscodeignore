@@ -3,7 +3,9 @@ src/**
 out/**
 node_modules/**
 tsconfig.json
+tsconfig.scroll.json
 vitest.config.ts
+playwright.config.ts
 package-lock.json
 **/*.map
 **/*.vsix
@@ -11,3 +13,9 @@ package-lock.json
 .gitignore
 media/*.png
 media/*.jpg
+coverage/**
+test-results/**
+scripts/**
+HANDOFF.md
+CLAUDE.md
+**/*.test.ts

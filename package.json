@@ -1,15 +1,15 @@
 {
-  "name": "claude-better-usage",
+  "name": "claude-code-insights",
   "publisher": "ijuani",
-  "displayName": "Claude Code - Better Usage",
-  "description": "Shows Claude Code usage (rate limits) in the status bar + real-time background agent monitoring panel",
+  "displayName": "Claude Code Insights",
+  "description": "Real-time insights for Claude Code: usage and rate limits, background agent monitoring, conversation viewer, session browser, and permission approvals",
   "icon": "favicon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/IJuanI/claude-usage-bar"
+    "url": "https://github.com/IJuanI/claude-insights"
   },
-  "version": "0.5.0",
+  "version": "0.1.0",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -17,131 +17,164 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onWebviewPanel:claudeCodeInsights.agentEditor"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "claudeUsageBar.refresh",
-        "title": "Claude Usage Bar: Refresh"
+        "command": "claudeCodeInsights.refresh",
+        "title": "Claude Code Insights: Refresh Usage"
       },
       {
-        "command": "claudeUsageBar.openPanel",
-        "title": "Claude Usage Bar: Open Panel"
+        "command": "claudeCodeInsights.openPanel",
+        "title": "Claude Code Insights: Open Usage Panel"
       },
       {
-        "command": "claudeUsageBar.toggleDebug",
-        "title": "Claude Agents: Toggle Debug Mode"
+        "command": "claudeCodeInsights.toggleDebug",
+        "title": "Claude Lens: Toggle Debug Mode"
       },
       {
-        "command": "claudeUsageBar.copyDebugInfo",
-        "title": "Claude Agents: Copy Workspace & Session"
+        "command": "claudeCodeInsights.copyDebugInfo",
+        "title": "Claude Lens: Copy Diagnostics"
       },
       {
-        "command": "claudeUsageBar.openAgents",
-        "title": "Background Agents",
+        "command": "claudeCodeInsights.showAgentLogs",
+        "title": "Claude Lens: Show Logs"
+      },
+      {
+        "command": "claudeCodeInsights.openAgents",
+        "title": "Claude Lens",
         "icon": {
           "light": "media/agents-icon-light.svg",
           "dark": "media/agents-icon.svg"
         }
       },
       {
-        "command": "claudeUsageBar.searchSessions",
+        "command": "claudeCodeInsights.searchSessions",
         "title": "Claude Sessions: Search",
         "icon": "$(search)"
       },
       {
-        "command": "claudeUsageBar.clearSessionSearch",
+        "command": "claudeCodeInsights.clearSessionSearch",
         "title": "Claude Sessions: Clear Search",
         "icon": "$(clear-all)"
       },
       {
-        "command": "claudeUsageBar.refreshSessions",
+        "command": "claudeCodeInsights.refreshSessions",
         "title": "Claude Sessions: Refresh",
         "icon": "$(refresh)"
       },
       {
-        "command": "claudeUsageBar.deepSearch",
+        "command": "claudeCodeInsights.deepSearch",
         "title": "Claude Sessions: Deep Search (content)"
       },
       {
-        "command": "claudeUsageBar.copySessionId",
-        "title": "Copy Session ID"
+        "command": "claudeCodeInsights.copySessionId",
+        "title": "Copy Id"
       },
       {
-        "command": "claudeUsageBar.copyAgentId",
-        "title": "Copy Agent ID"
+        "command": "claudeCodeInsights.copyAgentId",
+        "title": "Copy Id"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "claudeUsageBar.openAgents",
-          "when": "claudeUsageBar.hasBackgroundAgents && activeWebviewPanelId == claudeVSCodePanel",
+          "command": "claudeCodeInsights.openAgents",
+          "when": "claudeCodeInsights.hasBackgroundAgents && (activeWebviewPanelId == claudeVSCodePanel || claude-vscode.sideBarActive)",
           "group": "navigation"
         }
       ],
       "view/title": [
         {
-          "command": "claudeUsageBar.searchSessions",
-          "when": "view == claudeUsageBar.sessionTree",
+          "command": "claudeCodeInsights.searchSessions",
+          "when": "view == claudeCodeInsights.sessionTree",
           "group": "navigation@1"
         },
         {
-          "command": "claudeUsageBar.clearSessionSearch",
-          "when": "view == claudeUsageBar.sessionTree && claudeUsageBar.sessionSearchActive",
+          "command": "claudeCodeInsights.clearSessionSearch",
+          "when": "view == claudeCodeInsights.sessionTree && claudeCodeInsights.sessionSearchActive",
           "group": "navigation@2"
         },
         {
-          "command": "claudeUsageBar.refreshSessions",
-          "when": "view == claudeUsageBar.sessionTree",
+          "command": "claudeCodeInsights.refreshSessions",
+          "when": "view == claudeCodeInsights.sessionTree",
           "group": "navigation@3"
         }
       ],
-      "view/item/context": [
-        {
-          "command": "claudeUsageBar.copySessionId",
-          "when": "viewItem == session",
-          "group": "inline"
-        },
-        {
-          "command": "claudeUsageBar.copyAgentId",
-          "when": "viewItem == agent",
-          "group": "inline"
-        }
-      ]
+      "view/item/context": []
     },
     "views": {
       "claude-sessions-sidebar": [
         {
-          "id": "claudeUsageBar.sessionTree",
+          "type": "webview",
+          "id": "claudeCodeInsights.sessionTree",
           "name": "Sessions"
         },
         {
           "type": "webview",
-          "id": "claudeUsageBar.agentView",
-          "name": "Background Agents"
+          "id": "claudeCodeInsights.agentView",
+          "name": "Claude Lens"
         },
         {
           "type": "webview",
-          "id": "claudeUsageBar.usageView",
+          "id": "claudeCodeInsights.usageView",
           "name": "Claude Usage"
         }
       ]
     },
     "configuration": {
-      "title": "Claude Usage Bar",
+      "title": "Claude Code Insights",
       "properties": {
-        "claudeUsageBar.refreshInterval": {
+        "claudeCodeInsights.refreshInterval": {
           "type": "number",
           "default": 60,
           "description": "How often to refresh usage data (seconds)"
         },
-        "claudeUsageBar.debugMode": {
+        "claudeCodeInsights.debugMode": {
           "type": "boolean",
           "default": false,
           "description": "Show debug toolbar in Claude Agents panel (workspace/session selectors)"
+        },
+        "claudeCodeInsights.permissionProxy.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable permission proxy for background agent Bash commands (requires hook installation)"
+        },
+        "claudeCodeInsights.permissionProxy.timeout": {
+          "type": "number",
+          "default": 60,
+          "description": "Timeout in seconds before falling back to allowlist for permission requests"
+        },
+        "claudeCodeInsights.permissionProxy.interceptForegroundNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show foreground Claude Code approval requests inside the VS Code panel. When disabled, Claude Code handles them in the terminal without VS Code interception."
+        },
+        "claudeCodeInsights.permissionProxy.externalNotificationMode": {
+          "type": "string",
+          "enum": ["silent", "notifications", "panel"],
+          "default": "notifications",
+          "description": "How to handle approval requests from sessions not in the current workspace. 'silent' ignores them, 'notifications' shows VS Code notifications, 'panel' opens the dedicated approval panel."
+        },
+        "claudeCodeInsights.permissionProxy.localNotificationMode": {
+          "type": "string",
+          "enum": ["silent", "notifications", "panel"],
+          "default": "notifications",
+          "description": "How to handle approval requests from sessions in the current workspace when Claude Lens is not visible. 'silent' ignores them, 'notifications' shows VS Code notifications, 'panel' opens the dedicated approval panel."
+        },
+        "claudeCodeInsights.permissionProxy.focusBehavior": {
+          "type": "string",
+          "enum": ["never", "idle", "always"],
+          "default": "idle",
+          "description": "When the approval panel opens, whether to steal editor focus. 'never' = panel opens in background (you focus it manually), 'idle' = focus only when you haven't typed recently, 'always' = focus immediately."
+        },
+        "claudeCodeInsights.permissionProxy.focusIdleMs": {
+          "type": "number",
+          "default": 3000,
+          "description": "When focusBehavior=idle, how long (ms) the editor/terminal must be quiet before the approval panel may steal focus."
         }
       }
     }
@@ -149,14 +182,17 @@
   "scripts": {
     "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p ./",
-    "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap",
+    "bundle": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap && esbuild src/searchWorker.ts --bundle --outfile=dist/searchWorker.js --format=cjs --platform=node --minify --sourcemap && esbuild src/agentWebviewClient/index.ts --bundle --outfile=dist/agentWebviewClient.js --format=iife --platform=browser --minify --sourcemap",
     "watch": "tsc -watch -p ./",
-    "test": "vitest run"
+    "test": "vitest run",
+    "screenshot": "node scripts/screenshot.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vitest/coverage-v8": "^4.1.2",
     "esbuild": "^0.27.4",
+    "playwright": "^1.58.2",
     "typescript": "^5.3.0",
     "vitest": "^4.1.0"
   }

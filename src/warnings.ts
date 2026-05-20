@@ -12,6 +12,7 @@ export interface WarningState {
   sessionHotCount: number;
   weeklyHotCount: number;
   weeklyUnderuseCount: number;
+  contextBloatCount: number;
 }
 
 /** Schedule: fire at 0h, 1h, 2h from activation — max 3 per type */
@@ -19,7 +20,7 @@ const SCHEDULE_MS = [0, 3_600_000, 2 * 3_600_000];
 const MAX_FIRES = 3;
 
 export function freshWarningState(now: number = Date.now()): WarningState {
-  return { activatedAt: now, sessionHotCount: 0, weeklyHotCount: 0, weeklyUnderuseCount: 0 };
+  return { activatedAt: now, sessionHotCount: 0, weeklyHotCount: 0, weeklyUnderuseCount: 0, contextBloatCount: 0 };
 }
 
 function shouldFire(count: number, activatedAt: number, now: number): boolean {
@@ -83,13 +84,42 @@ export function evaluateWarnings(
       warned.weeklyUnderuseCount++;
       const pct = Math.round(weekly.utilization);
       const remaining = 100 - pct;
-      const hrs = Math.round(msLeft / 3_600_000);
+      const totalH = Math.round(msLeft / 3_600_000);
+      const days = Math.floor(totalH / 24);
+      const hrs = totalH % 24;
+      const rem = Math.round((msLeft % 3_600_000) / 60_000);
+      const timeLeft = days > 0 ? `${days}d ${hrs}h ${rem}m` : `${totalH}h ${rem}m`;
       warnings.push({
         level: 'info',
-        message: `Claude weekly usage at ${pct}% — ${remaining}% capacity resets in ${hrs}h. Use it or lose it!`,
+        message: `Claude weekly usage at ${pct}% — ${remaining}% capacity resets in ${timeLeft}. Use it or lose it!`,
       });
     }
   }
 
   return warnings;
+}
+
+function formatK(n: number): string {
+  return Math.round(n / 1000) + 'K';
+}
+
+/**
+ * Evaluates whether the current session has a bloated context.
+ * Fires at most 3 times per session (startup, +1h, +2h).
+ *
+ * Threshold: avgCacheRead > 300K tokens/msg
+ */
+export function evaluateContextBloat(
+  avgCacheRead: number,
+  sessionId: string,
+  warned: WarningState,
+  now: number = Date.now(),
+): Warning | null {
+  if (avgCacheRead <= 300_000) return null;
+  if (!shouldFire(warned.contextBloatCount, warned.activatedAt, now)) return null;
+  warned.contextBloatCount++;
+  return {
+    level: 'warning',
+    message: `Session context is very large (${formatK(avgCacheRead)} tokens/msg avg). This wastes usage quota. Consider continuing in a new session.`,
+  };
 }

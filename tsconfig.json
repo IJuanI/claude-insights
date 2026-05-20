@@ -10,5 +10,5 @@
     "lib": ["ES2020"]
   },
   "include": ["src"],
-  "exclude": ["node_modules", ".vscode-test"]
+  "exclude": ["node_modules", ".vscode-test", "src/**/*.scroll.test.ts"]
 }
