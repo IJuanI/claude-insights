@@ -2,3 +2,11 @@ node_modules/
 out/
 dist/
 *.vsix
+
+# Test + coverage output
+coverage/
+test-results/
+
+# Local-only working docs
+HANDOFF.md
+CLAUDE.md
