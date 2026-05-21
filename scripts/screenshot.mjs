@@ -80,7 +80,7 @@ if (!fs.existsSync(jsPath)) {
 }
 
 const css = fs.readFileSync(cssPath, 'utf-8');
-const clientJs = fs.readFileSync(jsPath, 'utf-8');
+const clientJs = fs.readFileSync(jsPath, 'utf-8').replace(/<\/script>/g, '<\\/script>');
 
 // ── Sample data ─────────────────────────────────────────────
 
@@ -264,13 +264,19 @@ const bgColor = theme === 'light' ? '#ffffff' : '#1e1e1e';
 // Replace the empty stylesheet link with inline styles
 let html = templateHtml.replace(
   '<link rel="stylesheet" href="">',
-  `<style>:root{${themeVars}} body{background:${bgColor};color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);margin:0;padding:0;} ${css}</style>`,
+  // The bundled CSS sets `body{background:transparent}` (VS Code provides the
+  // host background). Put our background on html, and use !important on body
+  // so the cascade can't override it. Append our overrides AFTER the bundled
+  // CSS for the same reason.
+  `<style>html{background:${bgColor};} :root{${themeVars}} ${css}
+  html, body { background: ${bgColor} !important; color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); margin: 0; padding: 0; }
+  </style>`,
 );
 
-// Replace the empty script src with inline client JS + VS Code mock
-html = html.replace(
-  `<script nonce="screenshot-nonce" src=""></script>`,
-  `<script nonce="screenshot-nonce">
+// Replace the empty script src with inline client JS + VS Code mock.
+// Use a function replacer so that '$' characters in the JS bundle (or in the
+// JSON payloads) are not interpreted as String.replace back-references.
+const replacement = `<script nonce="screenshot-nonce">
     // Mock VS Code API before client JS runs
     function acquireVsCodeApi() {
       return {
@@ -298,7 +304,10 @@ html = html.replace(
         },
       }, '*');
     }, 50);
-  </script>`,
+  </script>`;
+html = html.replace(
+  `<script nonce="screenshot-nonce" src=""></script>`,
+  () => replacement,
 );
 
 // ── Screenshot with Playwright ──────────────────────────────

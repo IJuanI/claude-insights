@@ -113,7 +113,11 @@ Expanded `<details>` blocks stay open across live updates, so a tool call you op
 
 ### Conversation tab
 
-![Conversation panel](https://raw.githubusercontent.com/IJuanI/claude-insights/main/media/conversation-panel.png)
+<p>
+  <img src="https://raw.githubusercontent.com/IJuanI/claude-insights/main/media/conversation-panel.png" alt="Conversation panel (dark)" width="48%" />
+  &nbsp;
+  <img src="https://raw.githubusercontent.com/IJuanI/claude-insights/main/media/conversation-panel-light.png" alt="Conversation panel (light)" width="48%" />
+</p>
 
 The full conversation, rendered exactly as Claude Code saw it. Messages load in batches of 50 — click "Load earlier messages" or flip the auto-load toggle to fetch more as you scroll up.
 
