@@ -24,7 +24,7 @@ export interface MessageHandlerCallbacks {
   focusSession(sessionId: string | null): void;
   jumpToSession(sessionId: string, messageIndex: number, projectKey?: string, searchQuery?: string): void;
   postToAll(msg: Record<string, unknown>): void;
-  getPermProxy(): import('../permissionProxy').PermissionProxyWatcher | undefined;
+  getPermProxy(): undefined;
   pushNotificationModes?(): void;
   restoreFocus?(): void;
 }
@@ -105,40 +105,6 @@ export class MessageRouter {
             selection: new vscode.Range(line, 0, line, 0),
           });
         }, () => {});
-      }
-    } else if (msg.command === 'dismissForegroundNotification') {
-      this._callbacks.getPermProxy()?.dismissNotification(msg.toolUseId as string);
-    } else if (msg.command === 'openPermPanel') {
-      this._callbacks.getPermProxy()?.openApprovalPanel();
-    } else if (msg.command === 'setNotificationMode') {
-      const permProxy = this._callbacks.getPermProxy();
-      if (permProxy) {
-        permProxy.setNotificationMode(
-          msg.scope as 'local' | 'external',
-          msg.mode as 'silent' | 'notifications' | 'panel',
-        );
-      }
-      this._callbacks.pushNotificationModes?.();
-    } else if (msg.command === 'permDecision') {
-      // Inline permission decision from conversation view — bypass batch panel
-      const uuid = msg.uuid as string;
-      const decision = msg.decision as 'allow' | 'deny';
-      const permProxy = this._callbacks.getPermProxy();
-      if (permProxy) {
-        permProxy.resolveInline(uuid, decision);
-        this._logger.log(`[PermProxy] Inline decision (via proxy): ${uuid.slice(0, 8)} → ${decision}`);
-      } else {
-        // Fallback: write directly if proxy not set
-        const PERM_DIR = '/tmp/claude-permissions';
-        const decFile = path.join(PERM_DIR, `dec-${uuid}.json`);
-        const tmpFile = path.join(PERM_DIR, `.dec-${uuid}.tmp`);
-        try {
-          fs.writeFileSync(tmpFile, JSON.stringify({ decision }));
-          fs.renameSync(tmpFile, decFile);
-          this._logger.log(`[PermProxy] Inline decision (fallback): ${uuid.slice(0, 8)} → ${decision}`);
-        } catch (e) {
-          this._logger.log(`[PermProxy] Failed to write inline decision: ${e}`);
-        }
       }
     } else if (msg.command === 'restoreFocus') {
       if (this._callbacks.restoreFocus) {

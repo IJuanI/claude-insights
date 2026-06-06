@@ -1451,8 +1451,6 @@ window.addEventListener('message', event => {
     if (msg.bgCommandComplete) {
       msg.bgCommandComplete.forEach(function(id) { _bgCommandComplete[id] = true; });
     }
-    // Restore pending permissions immediately on reload
-    if (msg.pendingPermissions) { renderPermWidget(msg.pendingPermissions); }
     try { renderTasks(currentTasks); } catch(renderErr) { renderFallback(renderErr); return; }
     _fixupBgCommandStatuses();
     try { renderConversation(); } catch(renderErr) { renderFallback(renderErr); return; }
@@ -1571,14 +1569,6 @@ window.addEventListener('message', event => {
   } else if (msg.command === 'diagHealthUpdate') {
     if (msg.checks) { _diagHealthChecks = msg.checks; }
     if (_diagPanelVisible) { renderDiagFooter(); }
-  } else if (msg.command === 'pendingPermissions') {
-    renderPermWidget(msg.items || []);
-  } else if (msg.command === 'foregroundNotifications') {
-    renderForegroundNotify(msg.items || []);
-  } else if (msg.command === 'notificationModes') {
-    _notifModeLocal = msg.local || 'panel';
-    _notifModeExternal = msg.external || 'notifications';
-    renderApprovalBanner();
   } else if (msg.command === 'switchTab') {
     switchTab(msg.tab);
   } else if (msg.command === 'focusAgent') {
@@ -2131,186 +2121,6 @@ function loadMoreConversation() {
   }
 }
 
-// ── Unified approval banner ──
-var _permItems = [];
-var _fgNotifyItems = [];
-var _permCountdownTimer = null;
-var _notifModeLocal = 'panel';
-var _notifModeExternal = 'notifications';
-
-function _buildModeToggle(scope, current) {
-  var modes = ['silent', 'notifications', 'panel'];
-  var icons = { silent: '\uD83D\uDD07', notifications: '\uD83D\uDD14', panel: '\uD83D\uDCCB' };
-  var html = '<div class="mode-toggle">';
-  for (var i = 0; i < modes.length; i++) {
-    var m = modes[i];
-    var active = m === current ? ' active' : '';
-    html += '<button class="mode-btn' + active + '" '
-      + 'onclick="_vsPostMessage({command:&#39;setNotificationMode&#39;,scope:&#39;' + scope + '&#39;,mode:&#39;' + m + '&#39;})" '
-      + 'title="' + m + '">'
-      + icons[m] + '</button>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function _setBannerState(mode) {
-  // mode: '' | 'user-pending' | 'fg-waiting'
-  var el = document.getElementById('approvalBanner');
-  if (!el) return;
-  el.classList.remove('visible', 'user-pending', 'fg-waiting');
-  if (mode) { el.classList.add('visible', mode); }
-}
-
-function renderApprovalBanner() {
-  var el = document.getElementById('approvalBanner');
-  if (!el) return;
-  if (_permCountdownTimer) { clearInterval(_permCountdownTimer); _permCountdownTimer = null; }
-
-  // User-side pending takes priority
-  if (_permItems && _permItems.length > 0) {
-    _setBannerState('user-pending');
-    var items = _permItems;
-    var first = items[0];
-    var n = items.length;
-
-    function fmtRem(item) {
-      if (item.timedOut) return { str: 'Denied (timed out)', rem: 0 };
-      var rem = Math.max(0, Math.round(item.timeout - (Date.now() - item.startTs) / 1000));
-      var m = Math.floor(rem / 60), s = rem % 60;
-      return { str: (m > 0 ? m + 'm ' : '') + s + 's', rem: rem };
-    }
-
-    function buildHtml() {
-      var firstRem = fmtRem(first);
-      var urgentCls = firstRem.rem < 60 ? ' urgent' : '';
-      var html = '<div class="appr-header">'
-        + '<span class="appr-title">⏳ ' + (n + ' pending') + '</span>'
-        + '<span class="appr-timeout' + urgentCls + '" id="permTimerEl">⏱ ' + _esc(firstRem.str) + '</span>'
-        + '<span class="appr-header-spacer"></span>'
-        + '<button class="appr-header-btn" onclick="_vsPostMessage({command:&#39;openPermPanel&#39;})" title="Open dedicated approval panel">Open panel</button>'
-        + '</div>';
-      html += '<div class="appr-list">';
-      for (var i = 0; i < items.length; i++) {
-        var it = items[i];
-        var r = fmtRem(it);
-        var activeCls = i === 0 ? ' appr-item-active' : '';
-        var timerCls = it.timedOut ? ' expired' : (r.rem < 60 ? ' urgent' : '');
-        html += '<div class="appr-item' + activeCls + (it.timedOut ? ' appr-item-timedout' : '') + '">'
-          + '<div class="appr-item-meta">'
-          + '<span class="appr-item-agent">' + _esc(it.agentId.slice(0, 8)) + '</span>'
-          + (it.toolName !== 'Bash' ? '<span>' + _esc(it.toolName) + '</span>' : '')
-          + '<span class="appr-item-timer' + timerCls + '">' + (it.timedOut ? '⌛' : '⏱') + ' ' + _esc(r.str) + '</span>'
-          + '</div>'
-          + '<span class="appr-cmd">$ ' + _esc(it.command.trim()) + '</span>'
-          + '</div>';
-      }
-      html += '</div>';
-      // Only show Allow/Deny for the first non-timed-out item
-      var actionableFirst = items[0];
-      html += '<div class="appr-actions">';
-      if (actionableFirst) {
-        html += '<button class="btn-allow" onclick="sendPermDecision(&#39;' + _esc(actionableFirst.uuid) + '&#39;,&#39;allow&#39;)">Allow</button>'
-          + '<button class="btn-deny" onclick="sendPermDecision(&#39;' + _esc(actionableFirst.uuid) + '&#39;,&#39;deny&#39;)">Deny</button>';
-      }
-      html += '<button class="appr-view-agent-btn" onclick="_vsPostMessage({command:&#39;switchTab&#39;,tab:&#39;agents&#39;});focusAgentByDesc(&#39;' + _esc(first.agentId) + '&#39;)" title="View agent">View agent</button>'
-        + '</div>';
-      return html;
-    }
-
-    el.innerHTML = buildHtml();
-
-    // Always focus — the extension handles typing debounce before showing the banner
-    var firstBtn = el.querySelector('.btn-allow');
-    if (firstBtn) {
-      (firstBtn as HTMLElement).focus();
-    } else {
-      el.setAttribute('tabindex', '-1');
-      (el as HTMLElement).focus();
-    }
-
-    _permCountdownTimer = setInterval(function() {
-      if (!_permItems.length) { clearInterval(_permCountdownTimer); _permCountdownTimer = null; return; }
-      var fi = _permItems[0];
-      var firstRem = Math.max(0, Math.round(fi.timeout - (Date.now() - fi.startTs) / 1000));
-      var m = Math.floor(firstRem / 60), s = firstRem % 60;
-      var timerEl = document.getElementById('permTimerEl');
-      if (timerEl) {
-        timerEl.textContent = '⏱ ' + (m > 0 ? m + 'm ' : '') + s + 's';
-        timerEl.className = 'appr-timeout' + (firstRem < 60 ? ' urgent' : '');
-      }
-      var itemEls = el.querySelectorAll('.appr-item-timer');
-      _permItems.forEach(function(it, idx) {
-        var r = Math.max(0, Math.round(it.timeout - (Date.now() - it.startTs) / 1000));
-        var im = Math.floor(r / 60), is = r % 60;
-        if (itemEls[idx]) {
-          itemEls[idx].textContent = '⏱ ' + (im > 0 ? im + 'm ' : '') + is + 's';
-          itemEls[idx].className = 'appr-item-timer' + (r < 60 ? ' urgent' : '');
-        }
-      });
-      if (firstRem <= 0) { clearInterval(_permCountdownTimer); _permCountdownTimer = null; }
-    }, 1000);
-
-  } else if (_fgNotifyItems && _fgNotifyItems.length > 0) {
-    // Claude-code-side waiting (foreground session)
-    _setBannerState('fg-waiting');
-    var items = _fgNotifyItems;
-    var html = '<div class="appr-header">'
-      + '<span class="appr-title">⏳ Awaiting</span>'
-      + '<span class="appr-header-spacer"></span>'
-      + '</div>';
-    html += '<div class="appr-list">';
-    for (var i = 0; i < items.length; i++) {
-      var item = items[i];
-      var sid = item.sessionId ? item.sessionId.slice(0, 8) : '';
-      html += '<div class="appr-item">'
-        + '<div class="appr-item-meta">'
-        + (sid ? '<code style="font-size:10px;opacity:0.6;background:var(--vscode-textCodeBlock-background);padding:1px 5px;border-radius:3px;">' + _esc(sid) + '</code>' : '')
-        + '<button class="appr-item-dismiss" title="Dismiss" onclick="_vsPostMessage({command:&#39;dismissForegroundNotification&#39;,toolUseId:&#39;' + _esc(item.toolUseId) + '&#39;})">✕</button>'
-        + '</div>'
-        + '<span class="appr-cmd">$ ' + _esc(item.command.trim()) + '</span>'
-        + '</div>';
-    }
-    html += '</div>';
-    el.innerHTML = html;
-
-  } else {
-    _setBannerState('');
-    el.innerHTML = '';
-  }
-}
-
-function renderPermWidget(items) {
-  _permItems = items || [];
-  renderApprovalBanner();
-}
-
-function renderForegroundNotify(items) {
-  _fgNotifyItems = items || [];
-  renderApprovalBanner();
-}
-
-function sendPermDecision(uuid, decision) {
-  _vsPostMessage({ command: 'permDecision', uuid: uuid, decision: decision });
-  _permItems = _permItems.filter(function(i) { return i.uuid !== uuid; });
-  renderApprovalBanner();
-}
-
-// Keyboard shortcuts for inline approval: 1/Enter/Space=allow, 3=deny first actionable item
-document.addEventListener('keydown', function(e) {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
-  var isAllow = e.key === '1' || e.key === 'Enter' || e.key === ' ';
-  var isDeny  = e.key === '3';
-  if (!isAllow && !isDeny) return;
-  var ae = document.activeElement;
-  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
-  var actionable = _permItems;
-  if (actionable.length === 0) return;
-  e.preventDefault();
-  sendPermDecision(actionable[0].uuid, isAllow ? 'allow' : 'deny');
-  // Restore focus to editor only once all pending approvals are resolved
-  if (_permItems.length === 0) _vsPostMessage({ command: 'restoreFocus' });
-});
 
 function convScrollTo(dir) {
   var convEl = _getConvEl();
@@ -2911,7 +2721,6 @@ updateConvScrollNav();
 // attributes in dynamically-rendered HTML must be attached to window explicitly.
 (window as any).vscode = { postMessage: _vsPostMessage, getState: vscode.getState.bind(vscode), setState: vscode.setState.bind(vscode) };
 (window as any)._vsPostMessage = _vsPostMessage;
-(window as any).sendPermDecision     = sendPermDecision;
 (window as any).focusAgent           = focusAgent;
 (window as any).focusAgentByDesc     = focusAgentByDesc;
 (window as any).expandMore           = expandMore;

@@ -109,27 +109,6 @@ describe('Fix 2: tasks collapsed by default', () => {
   });
 });
 
-// ── Fix 3: "1 pending" instead of "awaiting" ────────────────
-
-describe('Fix 3: pending count label uses "N pending" consistently', () => {
-  it('client source does not contain the old "awaiting" label for single pending', () => {
-    // Old code: (n === 1 ? 'awaiting' : n + ' pending')
-    // The word "awaiting" should not appear as a permission/pending label
-    const lines = CLIENT_SOURCE.split('\n');
-    const awaitingLines = lines.filter(
-      (l) => l.includes("'awaiting'") || l.includes('"awaiting"'),
-    );
-    expect(awaitingLines).toHaveLength(0);
-  });
-
-  it('client uses n + " pending" for all counts (including 1)', () => {
-    // The fix: always use n + ' pending' regardless of count
-    expect(CLIENT_SOURCE).toMatch(/n\s*\+\s*' pending'/);
-    // Should NOT have the ternary that special-cases n===1
-    expect(CLIENT_SOURCE).not.toMatch(/n\s*===\s*1\s*\?\s*'awaiting'/);
-  });
-});
-
 // ── Fix 4: Prompt button click handler + SVG icon ────────────
 
 describe('Fix 4: prompt button uses data-action instead of onclick stopPropagation', () => {

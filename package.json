@@ -2,7 +2,7 @@
   "name": "claude-code-insights-vscode",
   "publisher": "ijuani",
   "displayName": "Claude Code Insights",
-  "description": "Real-time insights for Claude Code: usage and rate limits, background agent monitoring, conversation viewer, session browser, and permission approvals",
+  "description": "Real-time insights for Claude Code: usage and rate limits, background agent monitoring, conversation viewer, and session browser",
   "icon": "favicon.png",
   "license": "MIT",
   "repository": {
@@ -137,44 +137,6 @@
           "type": "boolean",
           "default": false,
           "description": "Show debug toolbar in Claude Agents panel (workspace/session selectors)"
-        },
-        "claudeCodeInsights.permissionProxy.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable permission proxy for background agent Bash commands (requires hook installation)"
-        },
-        "claudeCodeInsights.permissionProxy.timeout": {
-          "type": "number",
-          "default": 60,
-          "description": "Timeout in seconds before falling back to allowlist for permission requests"
-        },
-        "claudeCodeInsights.permissionProxy.interceptForegroundNotifications": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show foreground Claude Code approval requests inside the VS Code panel. When disabled, Claude Code handles them in the terminal without VS Code interception."
-        },
-        "claudeCodeInsights.permissionProxy.externalNotificationMode": {
-          "type": "string",
-          "enum": ["silent", "notifications", "panel"],
-          "default": "notifications",
-          "description": "How to handle approval requests from sessions not in the current workspace. 'silent' ignores them, 'notifications' shows VS Code notifications, 'panel' opens the dedicated approval panel."
-        },
-        "claudeCodeInsights.permissionProxy.localNotificationMode": {
-          "type": "string",
-          "enum": ["silent", "notifications", "panel"],
-          "default": "notifications",
-          "description": "How to handle approval requests from sessions in the current workspace when Claude Lens is not visible. 'silent' ignores them, 'notifications' shows VS Code notifications, 'panel' opens the dedicated approval panel."
-        },
-        "claudeCodeInsights.permissionProxy.focusBehavior": {
-          "type": "string",
-          "enum": ["never", "idle", "always"],
-          "default": "idle",
-          "description": "When the approval panel opens, whether to steal editor focus. 'never' = panel opens in background (you focus it manually), 'idle' = focus only when you haven't typed recently, 'always' = focus immediately."
-        },
-        "claudeCodeInsights.permissionProxy.focusIdleMs": {
-          "type": "number",
-          "default": 3000,
-          "description": "When focusBehavior=idle, how long (ms) the editor/terminal must be quiet before the approval panel may steal focus."
         }
       }
     }

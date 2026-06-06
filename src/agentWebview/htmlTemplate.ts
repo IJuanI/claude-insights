@@ -37,9 +37,6 @@ export function getAgentPanelHtml(tasks: SerializedTask[], panel?: PanelInfo, op
     <button class="tab-btn${autoConvTab ? ' active' : ''}" data-tab="conversation" onclick="switchTab('conversation')">Conversation</button>
   </div>
 
-  <!-- Unified approval banner — covers user-side pending + claude-side waiting -->
-  <div id="approvalBanner"></div>
-
   <!-- Running tasks bar — visible across both tabs, stacks below sticky tab bar -->
   <div class="running-tasks-bar" id="runningTasksBar" style="display:none">
     <div class="running-tasks-header"><span class="running-tasks-icon">⟳</span> <span id="runningTasksCount">0</span> running</div>

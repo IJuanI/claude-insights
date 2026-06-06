@@ -23,7 +23,6 @@ import {
   getSessionLastContext,
 } from '../agentParser';
 import { getAgentPanelHtml, serializeTask, serializeConversation, renderConvMessageHtml, SerializedTask, PanelInfo, expandBlockLimit, ConversationMessage, DiagnosticInfo } from '../agentWebview';
-import { PendingPermItem } from '../permissionProxy';
 import { createDiagnosticLog, DiagnosticLog, HealthChecker } from '../diagnosticLog';
 import { SearchCoordinator } from './searchCoordinator';
 import { BgCommandWatcher } from './bgCommandWatcher';
@@ -60,7 +59,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
   private _convCache = new Map<string, { mtime: number; messages: ConversationMessage[] }>();
   private _diagLog: DiagnosticLog;
   private _healthChecker: HealthChecker;
-  private _permProxy?: import('../permissionProxy').PermissionProxyWatcher;
 
   // Extracted collaborators
   private _searchCoordinator: SearchCoordinator;
@@ -131,9 +129,9 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
         },
         jumpToSession: (sessionId, messageIndex, projectKey, searchQuery) => this._handleJumpToSession(sessionId, messageIndex, projectKey, searchQuery),
         postToAll: (msg) => this._postToAll(msg),
-        getPermProxy: () => this._permProxy,
-        pushNotificationModes: () => this.pushNotificationModes(),
-        restoreFocus: () => this._permProxy?.restoreFocus() ?? vscode.commands.executeCommand('workbench.action.focusPreviousGroup'),
+        getPermProxy: () => undefined,
+        pushNotificationModes: () => {},
+        restoreFocus: () => vscode.commands.executeCommand('workbench.action.focusPreviousGroup'),
       },
       this._searchCoordinator,
       { log: (msg) => this.log(msg) },
@@ -184,26 +182,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
     try { this._editorPanel?.webview.postMessage(msg); } catch {}
   }
 
-  /** Called by PermissionProxyWatcher whenever pending permission state changes */
-  pushPendingPermissions(items: PendingPermItem[]) {
-    this._postToAll({ command: 'pendingPermissions', items });
-  }
-
-  /** Called by PermissionProxyWatcher whenever foreground session notifications change */
-  pushForegroundNotifications(items: import('../permissionProxy').ForegroundNotifyItem[]) {
-    this._postToAll({ command: 'foregroundNotifications', items });
-  }
-
-  /** Push current notification mode settings to the webview */
-  pushNotificationModes() {
-    const modes = this._permProxy?.getNotificationModes() ?? { local: 'panel', external: 'notifications' };
-    this._postToAll({ command: 'notificationModes', ...modes });
-  }
-
-  /** Store reference to perm proxy so inline decisions can bypass the batch panel */
-  setPermProxy(proxy: import('../permissionProxy').PermissionProxyWatcher) {
-    this._permProxy = proxy;
-  }
 
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
@@ -493,7 +471,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
       taskDetectionTrace: this._lastTrace,
       diagLog: this._diagLog.getEntries().slice(-200),
       healthChecks: this._healthChecker.getResults(),
-      pendingPermissions: this._permProxy?.getPendingItems() ?? [],
       activeChipSessionId,
       sessionCtx: panelInfo.sessionCtx ?? {},
       sessionJsonlBytes,
@@ -516,7 +493,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
     }
     this._lastDiagnostics = diag;
     this._sendPendingCommands();
-    this.pushNotificationModes();
   }
 
   private _pendingClearSearch = false;
@@ -840,8 +816,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
         const descs = findAgentDescriptions(workspacePath, sid);
         for (const [k, v] of descs) this._descriptions.set(k, v);
       }
-      // Write permission mode files for hook consumption
-      this._writePermissionModes(workspacePath, result.sessionIds);
     }
 
     // Build trace object incrementally
@@ -1339,18 +1313,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
    * quickly check if a session is in "acceptEdits" mode etc.
    * File: /tmp/claude-permissions/mode-{sessionId}.json
    */
-  private _writePermissionModes(workspacePath: string, sessionIds: string[]) {
-    const permDir = path.join('/tmp', 'claude-permissions');
-    try { fs.mkdirSync(permDir, { recursive: true }); } catch {}
-    for (const sid of sessionIds) {
-      const mode = getSessionPermissionMode(workspacePath, sid);
-      if (!mode) continue;
-      const modeFile = path.join(permDir, `mode-${sid}.json`);
-      try {
-        fs.writeFileSync(modeFile, JSON.stringify({ sessionId: sid, permissionMode: mode }));
-      } catch {}
-    }
-  }
 
   dispose() {
     this._disposed = true;

@@ -21,7 +21,6 @@ import * as path from 'path';
 import { AgentPanelProvider } from './agentPanel';
 import { SessionTreeProvider, deepSearch } from './sessionTree';
 import { SessionDocumentProvider, SESSION_SCHEME } from './sessionConversation';
-import { PermissionProxyWatcher, provisionPermissionHook } from './permissionProxy';
 
 const BACKOFF_429_MS = 5 * 60_000;
 
@@ -384,22 +383,6 @@ export function activate(context: vscode.ExtensionContext) {
     },
   });
 
-  // ── Permission proxy ───────────────────────────────────────────
-  const permProxyEnabled = vscode.workspace.getConfiguration('claudeCodeInsights').get<boolean>('permissionProxy.enabled', true);
-  if (permProxyEnabled) {
-    provisionPermissionHook(context, agentProvider.getOutputChannel());
-    const permProxy = new PermissionProxyWatcher(
-      context,
-      agentProvider.getOutputChannel(),
-      () => agentProvider.getTrackedSessionIds(),
-    );
-    permProxy.setPushCallback(items => agentProvider.pushPendingPermissions(items));
-    permProxy.setNotifyPushCallback(items => agentProvider.pushForegroundNotifications(items));
-    permProxy.setPanelVisibleCallback(() => agentProvider.isPanelVisible());
-    agentProvider.setPermProxy(permProxy);
-    context.subscriptions.push(permProxy);
-
-  }
 
   // ── Commands ──────────────────────────────────────────────────
   context.subscriptions.push(
