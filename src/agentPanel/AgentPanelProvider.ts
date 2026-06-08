@@ -43,6 +43,7 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
   private _overrideWorkspace?: string;
   private _selectedSessionIds = new Set<string>();
   private _conversationSessionId?: string; // Which session to show in Conversation tab
+  private _lastRenderedConvSessionId?: string; // Detect session switch — force render even when no file changes
 
   private _lastIconState = false;
   private _editorPanel?: vscode.WebviewPanel;
@@ -54,9 +55,10 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
   private _convDebugDumped = false;
   private _convWatcher?: fs.FSWatcher;
   private _convWatchPath?: string;
-  private _convLastSize = 0;
+  private _convFileChanged = false; // Set by fs.watch callback; cleared after each refresh cycle
   private _convChanged = false; // Track if conversation file changed in current refresh cycle
-  private _convCache = new Map<string, { mtime: number; messages: ConversationMessage[] }>();
+  private _convCache = new Map<string, { seq: number; messages: ConversationMessage[] }>();
+  private _convWriteSeq = 0; // incremented by watcher on each file change
   private _diagLog: DiagnosticLog;
   private _healthChecker: HealthChecker;
 
@@ -220,21 +222,18 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
     if (this._selectedSessionIds.size > 0) {
       // Use only the user-selected sessions — do not merge task sessions so chips reflect the picker selection exactly
       const sessionIds = [...this._selectedSessionIds];
-      this.log(`[task-detection] getEffectiveSessions: using override sessions=[${sessionIds.join(', ')}]`);
       return { sessionIds, projectKey, selectedBy: 'override' };
     }
 
-    const current = findCurrentSession(workspacePath, (msg) => this.log(msg));
+    const current = findCurrentSession(workspacePath);
     const sessionIds = new Set<string>();
     if (current) sessionIds.add(current.sessionId);
     for (const ts of taskSessions) sessionIds.add(ts);
 
     if (sessionIds.size === 0) {
-      this.log(`[task-detection] getEffectiveSessions: findCurrentSession returned null and no task sessions for workspace=${workspacePath}`);
       return null;
     }
 
-    this.log(`[task-detection] getEffectiveSessions: selected sessions=[${[...sessionIds].join(', ')}] (current=${current?.sessionId ?? 'none'}, taskSessions=[${taskSessions.join(', ')}]), projectKey=${projectKey}`);
     return { sessionIds: [...sessionIds], projectKey, selectedBy: 'most-recent' };
   }
 
@@ -554,11 +553,13 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
 
     // Poll for discovery only (new sessions/dirs/conv files).
     // fs.watch on each discovered path handles all real-time rendering updates.
+    // 10 seconds is sufficient for discovery; aggressive polling was causing
+    // sustained event loop pressure that froze Delete/Enter keys in VS Code.
     this._pollTimer = setInterval(() => {
       if (this._disposed) return;
       if (!this._view && !this._editorPanel) return;
       this.checkForUpdates();
-    }, 1000);
+    }, 10_000);
   }
 
   private stopWatching() {
@@ -643,7 +644,7 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
         this._convWatchPath = undefined;
         if (fs.existsSync(jsonlPath)) {
           try {
-            this._convWatcher = fs.watch(jsonlPath, () => { this._healthChecker.recordEvent(`watcherFired:${jsonlPath}`); this.refresh(); });
+            this._convWatcher = fs.watch(jsonlPath, () => { this._healthChecker.recordEvent(`watcherFired:${jsonlPath}`); this._convFileChanged = true; this.refresh(); });
             this._convWatchPath = jsonlPath;
           } catch {}
         }
@@ -699,16 +700,13 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
       try {
         const projectKey = pathToProjectKey(workspace);
         const jsonlPath = path.join(os.homedir(), '.claude', 'projects', projectKey, `${convSession.id}.jsonl`);
-        let mtime = 0;
-        try { mtime = fs.statSync(jsonlPath).mtimeMs; } catch {}
         const cached = this._convCache.get(convSession.id);
-        // Skip cache if conversation file changed during this refresh cycle
-        // mtime-based caching has race conditions with file writes, so we force re-parse on actual changes
-        if (!this._convChanged && cached && cached.mtime === mtime) {
+        // Use flag-based cache invalidation — the fs.watch callback already tells us the file changed
+        if (!this._convChanged && cached) {
           conversation = cached.messages;
         } else {
           conversation = parseSessionConversation(workspace, convSession.id);
-          this._convCache.set(convSession.id, { mtime, messages: conversation });
+          this._convCache.set(convSession.id, { seq: this._convWriteSeq, messages: conversation });
         }
       } catch (e) {
         error = `Failed to parse conversation: ${e}`;
@@ -774,19 +772,14 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private _doRefresh() {
-    const t0 = Date.now();
     const workspacePath = this.getEffectiveWorkspacePath();
     if (!workspacePath) {
-      this.log('[task-detection] _doRefresh: no workspace path resolved — rendering empty');
       this.renderEmpty();
       return;
     }
 
-    this.log(`[task-detection] _doRefresh: workspace=${workspacePath}`);
-
     const result = this.getEffectiveSessions(workspacePath);
     if (!result) {
-      this.log(`[task-detection] _doRefresh: getEffectiveSessions returned null for workspace=${workspacePath} — rendering empty`);
       // Build a minimal trace for diagnostics
       this._lastTrace = {
         workspacePath,
@@ -802,13 +795,10 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    this.log(`[task-detection] _doRefresh: sessions=[${result.sessionIds.join(', ')}], selectedBy=${result.selectedBy}`);
-
     const currentIdSet = new Set(result.sessionIds);
     const sessionChanged = currentIdSet.size !== this._currentSessionIds.size
       || [...currentIdSet].some(id => !this._currentSessionIds.has(id));
     if (sessionChanged) {
-      this.log(`[task-detection] _doRefresh: session set changed — clearing tasks and descriptions`);
       this._currentSessionIds = currentIdSet;
       this._tasks.clear();
       this._descriptions.clear();
@@ -837,7 +827,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
       const subagentsExists = fs.existsSync(subagentsDir);
       const subagentFiles = listSubagentFiles(subagentsDir);
       trace.subagentsDirs.push({ path: subagentsDir, exists: subagentsExists, fileCount: subagentFiles.length });
-      this.log(`[task-detection] _doRefresh: subagentsDir=${subagentsDir}, exists=${subagentsExists}, files=${subagentFiles.length}`);
       for (const file of subagentFiles) {
         const agentId = path.basename(file).replace(/^agent-/, '').replace(/\.jsonl$/, '');
         if (!_seenAgentFiles.has(agentId)) {
@@ -850,7 +839,6 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
       const tasksExists = fs.existsSync(tasksDir);
       const taskFiles = listAgentFiles(tasksDir);
       trace.tmpTaskDirs.push({ path: tasksDir, exists: tasksExists, fileCount: taskFiles.length });
-      this.log(`[task-detection] _doRefresh: tasksDir=${tasksDir}, exists=${tasksExists}, files=${taskFiles.length}`);
       for (const file of taskFiles) {
         const agentId = path.basename(file).replace('.output', '');
         if (!_seenAgentFiles.has(agentId)) {
@@ -861,28 +849,20 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
 
       // Track conversation JSONL path
       const jsonlPath = path.join(os.homedir(), '.claude', 'projects', result.projectKey, `${sid}.jsonl`);
-      let jsonlSize = 0;
       const jsonlExists = fs.existsSync(jsonlPath);
-      if (jsonlExists) {
-        try { jsonlSize = fs.statSync(jsonlPath).size; } catch {}
-      }
-      trace.convJsonlPaths.push({ path: jsonlPath, exists: jsonlExists, size: jsonlSize });
-      this.log(`[task-detection] _doRefresh: convJsonl=${jsonlPath}, exists=${jsonlExists}, size=${jsonlSize}`);
+      trace.convJsonlPaths.push({ path: jsonlPath, exists: jsonlExists, size: 0 });
     }
 
-    this.log(`[task-detection] _doRefresh: allFiles total (after dedup)=${allFiles.length}, existing cached tasks=${this._tasks.size}`);
     this._lastTrace = trace;
 
     if (allFiles.length === 0 && this._tasks.size === 0) {
       // Even with no agents, render the panel if we have conversation data
       const panelInfo = this._makePanelInfo();
       if (panelInfo.conversation && panelInfo.conversation.length > 0) {
-        this.log(`[task-detection] _doRefresh: no agent files found, falling back to conversation-only (${panelInfo.conversation.length} msgs)`);
         trace.reason = `no agent files found in subagents or tmp dirs — showing conversation-only`;
         this._renderWithConversationOnly(panelInfo);
         return;
       }
-      this.log('[task-detection] _doRefresh: no agents and no conversation — rendering empty');
       trace.reason = 'no agent files found and no conversation messages';
       this.renderEmpty();
       return;
@@ -943,24 +923,20 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    // Check if conversation JSONL changed
+    // Check if conversation JSONL changed — flag is set by fs.watch callback, no stat needed
     let convChanged = false;
-    if (this._convWatchPath) {
-      try {
-        const sz = fs.statSync(this._convWatchPath).size;
-        if (sz !== this._convLastSize) {
-          this._convLastSize = sz;
-          convChanged = true;
-          this._convChanged = true; // Mark for cache skip during this refresh cycle
-        }
-      } catch {}
+    if (this._convFileChanged) {
+      convChanged = true;
+      this._convChanged = true;
+      this._convFileChanged = false;
+      this._convWriteSeq++;
     }
 
-    if (changed) {
-      this.log(`refresh: tasks=${this._tasks.size}, took ${Date.now() - t0}ms`);
-    }
-    if (changed || convChanged || !this._initialized.has('sidebar') || !this._initialized.has('editor')) {
-      this._render(convChanged);
+    const convSessionChanged = this._conversationSessionId !== this._lastRenderedConvSessionId;
+    if (convSessionChanged) this._lastRenderedConvSessionId = this._conversationSessionId;
+
+    if (changed || convChanged || convSessionChanged || !this._initialized.has('sidebar') || !this._initialized.has('editor')) {
+      this._render(convChanged || convSessionChanged);
     }
   }
 
@@ -1045,6 +1021,7 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
         this._bgCommandWatcher.flushBgOutputs();
       }
 
+      this._healthChecker.recordEvent('updateTasksSent');
       // Send any pending focus/tab commands after data update
       this._sendPendingCommands();
     } catch (e) {
@@ -1099,6 +1076,7 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
     } else if (this._editorPanel) {
       this._editorPanel.webview.postMessage({ command: 'updateTasks', tasks: [], conversation: [], conversationHtml: [], bgCommandComplete: [], taskDetectionTrace: this._lastTrace, sessionCtx: panelInfo.sessionCtx ?? {}, sessionJsonlBytes: this._buildSessionJsonlBytes() });
     }
+    this._healthChecker.recordEvent('updateTasksSent');
   }
 
   private _renderWithConversationOnly(panelInfo: PanelInfo) {
@@ -1134,6 +1112,7 @@ export class AgentPanelProvider implements vscode.WebviewViewProvider {
       this._editorPanel.webview.postMessage({ command: 'updateTasks', tasks: [], conversation: convMessages, conversationHtml: this._cachedConvHtml, bgCommandComplete: this._bgCommandWatcher.getCompleteSerialized(), taskDetectionTrace: this._lastTrace, sessionCtx: panelInfo.sessionCtx ?? {}, sessionJsonlBytes: this._buildSessionJsonlBytes() });
       this._bgCommandWatcher.flushBgOutputs();
     }
+    this._healthChecker.recordEvent('updateTasksSent');
   }
 
   openInEditor() {

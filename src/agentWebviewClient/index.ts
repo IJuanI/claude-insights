@@ -2735,6 +2735,18 @@ updateConvScrollNav();
 (window as any).exportDiagnostics    = exportDiagnostics;
 (window as any).copyText             = copyText;
 (window as any).switchTab            = switchTab;
+(window as any).toggleDiagPanel      = toggleDiagPanel;
+(window as any).copyDiagnostics      = copyDiagnostics;
+(window as any).toggleConvMode       = toggleConvMode;
+(window as any).setFilter            = setFilter;
+(window as any).toggleViewMode       = toggleViewMode;
+(window as any).toggleSearchScope    = toggleSearchScope;
+(window as any).setSearchScope       = setSearchScope;
+(window as any).toggleMatchCase      = toggleMatchCase;
+(window as any).toggleMatchWholeWord = toggleMatchWholeWord;
+(window as any).setSearchPreviewMode = setSearchPreviewMode;
+(window as any).convScrollTo         = convScrollTo;
+(window as any).expandResult         = expandResult;
 
 // Signal to extension that webview is ready for data
 _vsPostMessage({ command: 'webviewReady' });

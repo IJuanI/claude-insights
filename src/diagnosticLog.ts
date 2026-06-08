@@ -192,6 +192,7 @@ export class HealthChecker {
   private stateProvider: (() => any) | undefined;
 
   private lastInitDataSent: number | undefined;
+  private lastUpdateSent: number | undefined; // updated on both initData and updateTasks
   private lastPongReceived: number | undefined;
   private lastPingSent: number | undefined;
   private expectedTaskCount: number | undefined;
@@ -211,7 +212,10 @@ export class HealthChecker {
 
     if (name === 'initDataSent') {
       this.lastInitDataSent = now;
+      this.lastUpdateSent = now;
       this.hasActiveWatchers = true;
+    } else if (name === 'updateTasksSent') {
+      this.lastUpdateSent = now;
     } else if (name === 'pongReceived') {
       this.lastPongReceived = now;
     } else if (name === 'pingSent') {
@@ -261,7 +265,11 @@ export class HealthChecker {
     const criticals = this.getResults().filter((r) => r.status === 'critical').length;
     const warns = this.getResults().filter((r) => r.status === 'warn').length;
     if (criticals > 0 || warns > 0) {
-      this.log.warn('health', 'health', `Health check: ${criticals} critical, ${warns} warn`);
+      const failing = this.getResults()
+        .filter((r) => r.status !== 'ok')
+        .map((r) => `${r.name}(${r.status}): ${r.message}`)
+        .join('; ');
+      this.log.warn('health', 'health', `Health check: ${criticals} critical, ${warns} warn — ${failing}`);
     }
   }
 
@@ -276,15 +284,15 @@ export class HealthChecker {
   }
 
   private checkMessageFlow(): void {
-    if (!this.hasActiveWatchers || this.lastInitDataSent === undefined) {
+    if (!this.hasActiveWatchers || this.lastUpdateSent === undefined) {
       this.record('messageFlow', 'ok', 'No active watchers');
       return;
     }
-    const age = (Date.now() - this.lastInitDataSent) / 1000;
-    if (age > 15) {
-      this.record('messageFlow', 'warn', `Last _sendInitData was ${Math.round(age)}s ago`);
+    const age = (Date.now() - this.lastUpdateSent) / 1000;
+    if (age > 60) {
+      this.record('messageFlow', 'warn', `Last updateTasks/initData was ${Math.round(age)}s ago`);
     } else {
-      this.record('messageFlow', 'ok', `Last _sendInitData was ${Math.round(age)}s ago`);
+      this.record('messageFlow', 'ok', `Last updateTasks/initData was ${Math.round(age)}s ago`);
     }
   }
 

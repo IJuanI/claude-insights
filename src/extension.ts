@@ -24,6 +24,109 @@ import { SessionDocumentProvider, SESSION_SCHEME } from './sessionConversation';
 
 const BACKOFF_429_MS = 5 * 60_000;
 
+/**
+ * Provision ~/.claude/statusline-wrapper.sh if missing, and wire it into
+ * ~/.claude/settings.json if not already there. Silent no-op on any error.
+ */
+function ensureStatuslineScripts(): void {
+  try {
+    const claudeDir = path.join(os.homedir(), '.claude');
+    const wrapperPath = path.join(claudeDir, 'statusline-wrapper.sh');
+    const statuslinePath = path.join(claudeDir, 'statusline.sh');
+    const settingsPath = path.join(claudeDir, 'settings.json');
+
+    // Write wrapper if missing
+    if (!fs.existsSync(wrapperPath)) {
+      const wrapper = [
+        '#!/usr/bin/env bash',
+        '# Claude Code statusline - reads per-session metrics from collector socket',
+        '# Falls back to extension cache if socket unavailable',
+        '',
+        'COLLECTOR_SOCK="${XDG_STATE_HOME:-$HOME/.local/state}/claude-warden/collector.sock"',
+        'SESSION_ID="${CLAUDE_SESSION_ID:-}"',
+        '',
+        'if [ -n "$SESSION_ID" ] && [ -S "$COLLECTOR_SOCK" ]; then',
+        '  session_json=$(curl -sf --max-time 0.05 \\',
+        '    --unix-socket "$COLLECTOR_SOCK" \\',
+        '    "http://localhost/v1/sessions/${SESSION_ID}/context" 2>/dev/null)',
+        '  if [ -n "$session_json" ]; then',
+        '    output=$(jq -c \'{ session_id: "\'$SESSION_ID\'", model: { id: (.model.id // "claude-sonnet-4-6"), display_name: (.model.display_name // "Sonnet 4.6") }, context_window: { context_window_size: (.context_window_size // 200000), total_input_tokens: ((.input_tokens // 0) + (.cache_read_tokens // 0) + (.cache_creation_tokens // 0)), total_output_tokens: 0, used_percentage: (.used_pct // 0) }, tool_count: (.tool_count // 0) }\' <<<"$session_json" 2>/dev/null)',
+        '    if [ -n "$output" ] && [ "$output" != "null" ]; then',
+        '      echo "$output" | "$HOME/.claude/statusline.sh"',
+        '      exit 0',
+        '    fi',
+        '  fi',
+        'fi',
+        '',
+        'usage_cache="$HOME/.claude/claude-code-insights-cache.json"',
+        'if [ -f "$usage_cache" ]; then',
+        '  output=$(jq -c \'{ session_id: (.session.session_id // ""), model: (.session.model // {id: "claude-sonnet-4-6", display_name: "Sonnet 4.6"}), context_window: (.session.context_window // {context_window_size: 200000, used_percentage: 0}), tool_count: (.session.tool_count // 0) }\' <"$usage_cache" 2>/dev/null)',
+        '  if [ -n "$output" ] && [ "$output" != "null" ]; then',
+        '    echo "$output" | "$HOME/.claude/statusline.sh"',
+        '    exit 0',
+        '  fi',
+        'fi',
+        '',
+        'echo \'{}\'  | "$HOME/.claude/statusline.sh"',
+      ].join('\n') + '\n';
+      fs.writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
+    }
+
+    // Wire into settings.json if the statusline command key is absent or wrong
+    if (fs.existsSync(settingsPath)) {
+      try {
+        const raw = fs.readFileSync(settingsPath, 'utf-8');
+        const settings = JSON.parse(raw);
+        const currentCmd: string = settings?.statusline?.command ?? '';
+        if (!currentCmd.includes('statusline')) {
+          settings.statusline = { ...(settings.statusline ?? {}), command: '$HOME/.claude/statusline-wrapper.sh' };
+          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+        }
+      } catch { /* malformed settings.json — leave it alone */ }
+    } else {
+      // No settings.json yet — create minimal one
+      fs.writeFileSync(settingsPath, JSON.stringify({ statusline: { command: '$HOME/.claude/statusline-wrapper.sh' } }, null, 2), 'utf-8');
+    }
+
+    // Ensure statusline.sh is executable if it exists
+    if (fs.existsSync(statuslinePath)) {
+      try { fs.chmodSync(statuslinePath, 0o755); } catch { /* ignore */ }
+    }
+  } catch { /* silently ignore all errors — statusline is optional */ }
+}
+
+/** Read the most recently used model from the latest session JSONL for a workspace. */
+function readCurrentModel(workspacePath: string): { id: string; display_name: string } | null {
+  try {
+    const projectKey = pathToProjectKey(workspacePath);
+    const projectDir = path.join(os.homedir(), '.claude', 'projects', projectKey);
+    const files = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('.'));
+    if (files.length === 0) return null;
+
+    // Pick the most recently modified session JSONL
+    let latestMtime = 0, latestFile = '';
+    for (const f of files) {
+      const mtime = fs.statSync(path.join(projectDir, f)).mtimeMs;
+      if (mtime > latestMtime) { latestMtime = mtime; latestFile = f; }
+    }
+
+    const content = fs.readFileSync(path.join(projectDir, latestFile), 'utf-8');
+    const lines = content.split('\n').filter(Boolean);
+    // Scan from the end — the most recent model entry wins
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 200); i--) {
+      try {
+        const entry = JSON.parse(lines[i]);
+        const model = entry?.message?.model ?? entry?.model;
+        if (model && typeof model === 'string' && model !== '<synthetic>') {
+          const short = model.replace(/^claude-/, '').replace(/-\d{8}$/, '');
+          return { id: model, display_name: short };
+        }
+      } catch { /* skip malformed lines */ }
+    }
+  } catch { /* directory or file missing */ }
+  return null;
+}
+
 
 interface State {
   creds: ClaudeCredentials | null;
@@ -155,12 +258,17 @@ export function activate(context: vscode.ExtensionContext) {
     // Preserve last-known good usage when writing an error — don't overwrite
     // cached good data with null just because this fetch failed.
     const usageToCache = state.usage ?? cached?.usage ?? null;
+    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const currentModel = workspacePath ? readCurrentModel(workspacePath) : null;
+    const sessionForCache = currentModel
+      ? { session_id: '', model: currentModel, context_window: { context_window_size: 200000, total_input_tokens: 0, total_output_tokens: 0, used_percentage: 0 } }
+      : (cached?.session ?? null);
     writeSharedCache({
       usage: usageToCache,
       error: state.fetchError,
       backoffUntil: state.backoffUntil,
       fetchedAt: now,
-      session: null,
+      session: sessionForCache,
     });
   }
 
@@ -333,15 +441,23 @@ export function activate(context: vscode.ExtensionContext) {
           }
           const sessionId = latestFile.replace(/\.jsonl$/, '');
           const tokenUsage = getSessionTokenUsage(workspacePath, sessionId);
-          const bloatWarning = evaluateContextBloat(tokenUsage.avgCacheRead, sessionId, warned);
-          if (bloatWarning) {
-            vscode.window.showWarningMessage(bloatWarning.message, 'Continue in New Session', 'Dismiss').then(action => {
-              if (action === 'Continue in New Session') {
-                const term = vscode.window.createTerminal('Claude (new session)');
-                term.show();
-                term.sendText(`claude --resume ${sessionId}`);
-              }
-            });
+          // Cross-reload cooldown: don't re-fire within 10 minutes even if the extension reloads
+          const BLOAT_COOLDOWN_MS = 10 * 60 * 1000;
+          const lastBloatAt = context.workspaceState.get<number>('lastContextBloatNotifAt', 0);
+          if (Date.now() - lastBloatAt < BLOAT_COOLDOWN_MS) {
+            // Already notified recently — skip the in-memory warned check too
+          } else {
+            const bloatWarning = evaluateContextBloat(tokenUsage.avgCacheRead, sessionId, warned);
+            if (bloatWarning) {
+              context.workspaceState.update('lastContextBloatNotifAt', Date.now());
+              vscode.window.showWarningMessage(bloatWarning.message, 'Continue in New Session', 'Dismiss').then(action => {
+                if (action === 'Continue in New Session') {
+                  const term = vscode.window.createTerminal('Claude (new session)');
+                  term.show();
+                  term.sendText(`claude --resume ${sessionId}`);
+                }
+              });
+            }
           }
         }
       } catch {
@@ -620,6 +736,9 @@ export function activate(context: vscode.ExtensionContext) {
       }
     })
   );
+
+  // ── Statusline provisioning ───────────────────────────────────
+  ensureStatuslineScripts();
 
   // ── Boot + polling ────────────────────────────────────────────
   async function tick() {

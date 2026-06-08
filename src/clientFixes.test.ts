@@ -207,3 +207,44 @@ describe('Fix 5: conversation auto-scroll stability', () => {
     expect(rafBlock![0]).toMatch(/_convLockedToBottom[\s\S]{0,120}_scrollConvToBottom/);
   });
 });
+
+// ── Fix 5: Missing window exports for onclick handlers ────────────────────────
+//
+// Functions used in onclick="fn()" attributes in htmlTemplate.ts and
+// serverHelpers.ts must be explicitly assigned to window, because the client
+// code runs inside an IIFE (esbuild output) whose scope is not the global scope.
+// Missing exports cause silent "fn is not defined" errors when buttons are clicked.
+
+describe('Fix 5: window exports cover all onclick functions', () => {
+  // Extract the window-export block from the client source
+  const windowExportBlock = CLIENT_SOURCE.slice(
+    CLIENT_SOURCE.indexOf('Expose globals needed by inline onclick'),
+  );
+
+  const functions = [
+    // Functions called from htmlTemplate.ts
+    'toggleDiagPanel',
+    'copyDiagnostics',
+    'toggleConvMode',
+    'setFilter',
+    'toggleViewMode',
+    'toggleSearchScope',
+    'setSearchScope',
+    'toggleMatchCase',
+    'toggleMatchWholeWord',
+    'setSearchPreviewMode',
+    'convScrollTo',
+    // Functions called from serverHelpers.ts
+    'expandResult',
+    // Already present — regression guard
+    'switchTab',
+    'loadMoreConversation',
+    'expandMore',
+  ];
+
+  for (const fn of functions) {
+    it(`window.${fn} is exported`, () => {
+      expect(windowExportBlock).toMatch(new RegExp(`window.*\\.${fn}\\s*=\\s*${fn}`));
+    });
+  }
+});
