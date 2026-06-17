@@ -238,19 +238,6 @@ function renderDiagFooter() {
   var warnings = (d.warnings || []).map(function(w) { return '<div class="diag-warning">⚠ ' + escHtml(w) + '</div>'; }).join('');
   var sessions = (d.sessionIds || []).join(', ') || 'none';
 
-  // Notification mode controls
-  var modeSection = '<div class="diag-section">'
-    + '<div class="diag-label">Notification Modes</div>'
-    + '<div style="display:flex;gap:8px;align-items:center;margin:4px 0;">'
-    + '<span style="font-size:10px;min-width:55px;">Local:</span>'
-    + _buildModeToggle('local', _notifModeLocal)
-    + '</div>'
-    + '<div style="display:flex;gap:8px;align-items:center;margin:4px 0;">'
-    + '<span style="font-size:10px;min-width:55px;">External:</span>'
-    + _buildModeToggle('external', _notifModeExternal)
-    + '</div>'
-    + '</div>';
-
   // Health checks section
   var healthHtml = '<div class="diag-section-title">Health</div>';
   if (_diagHealthChecks.length === 0) {
@@ -289,7 +276,6 @@ function renderDiagFooter() {
     '<div class="diag-row"><span class="diag-label">DOM tasks:</span><span class="diag-value" id="diagDomCount">?</span></div>' +
     '<div class="diag-row"><span class="diag-label">JS errors:</span><span class="diag-value" id="diagErrCount">' + errCount + '</span></div>' +
     warnings +
-    modeSection +
     healthHtml +
     logHtml +
     '<div class="diag-error-log" id="diagErrorLog"></div>' +

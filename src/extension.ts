@@ -25,6 +25,23 @@ import { SessionDocumentProvider, SESSION_SCHEME } from './sessionConversation';
 const BACKOFF_429_MS = 5 * 60_000;
 
 /**
+ * Remove any PreToolUse hook entry that references permission-proxy.sh — the
+ * stale approval-system hook a previous version of this extension registered.
+ * Mutates `settings` in place. Returns true if anything was removed.
+ */
+function removeStalePermissionProxyHook(settings: any): boolean {
+  const pre = settings?.hooks?.PreToolUse;
+  if (!Array.isArray(pre)) return false;
+  const referencesProxy = (entry: any): boolean =>
+    Array.isArray(entry?.hooks) &&
+    entry.hooks.some((h: any) => typeof h?.command === 'string' && h.command.includes('permission-proxy'));
+  const kept = pre.filter((e: any) => !referencesProxy(e));
+  if (kept.length === pre.length) return false;
+  settings.hooks.PreToolUse = kept;
+  return true;
+}
+
+/**
  * Provision ~/.claude/statusline-wrapper.sh if missing, and wire it into
  * ~/.claude/settings.json if not already there. Silent no-op on any error.
  */
@@ -35,52 +52,95 @@ function ensureStatuslineScripts(): void {
     const statuslinePath = path.join(claudeDir, 'statusline.sh');
     const settingsPath = path.join(claudeDir, 'settings.json');
 
-    // Write wrapper if missing
-    if (!fs.existsSync(wrapperPath)) {
-      const wrapper = [
-        '#!/usr/bin/env bash',
-        '# Claude Code statusline - reads per-session metrics from collector socket',
-        '# Falls back to extension cache if socket unavailable',
-        '',
-        'COLLECTOR_SOCK="${XDG_STATE_HOME:-$HOME/.local/state}/claude-warden/collector.sock"',
-        'SESSION_ID="${CLAUDE_SESSION_ID:-}"',
-        '',
-        'if [ -n "$SESSION_ID" ] && [ -S "$COLLECTOR_SOCK" ]; then',
-        '  session_json=$(curl -sf --max-time 0.05 \\',
-        '    --unix-socket "$COLLECTOR_SOCK" \\',
-        '    "http://localhost/v1/sessions/${SESSION_ID}/context" 2>/dev/null)',
-        '  if [ -n "$session_json" ]; then',
-        '    output=$(jq -c \'{ session_id: "\'$SESSION_ID\'", model: { id: (.model.id // "claude-sonnet-4-6"), display_name: (.model.display_name // "Sonnet 4.6") }, context_window: { context_window_size: (.context_window_size // 200000), total_input_tokens: ((.input_tokens // 0) + (.cache_read_tokens // 0) + (.cache_creation_tokens // 0)), total_output_tokens: 0, used_percentage: (.used_pct // 0) }, tool_count: (.tool_count // 0) }\' <<<"$session_json" 2>/dev/null)',
-        '    if [ -n "$output" ] && [ "$output" != "null" ]; then',
-        '      echo "$output" | "$HOME/.claude/statusline.sh"',
-        '      exit 0',
-        '    fi',
-        '  fi',
-        'fi',
-        '',
-        'usage_cache="$HOME/.claude/claude-code-insights-cache.json"',
-        'if [ -f "$usage_cache" ]; then',
-        '  output=$(jq -c \'{ session_id: (.session.session_id // ""), model: (.session.model // {id: "claude-sonnet-4-6", display_name: "Sonnet 4.6"}), context_window: (.session.context_window // {context_window_size: 200000, used_percentage: 0}), tool_count: (.session.tool_count // 0) }\' <"$usage_cache" 2>/dev/null)',
-        '  if [ -n "$output" ] && [ "$output" != "null" ]; then',
-        '    echo "$output" | "$HOME/.claude/statusline.sh"',
-        '    exit 0',
-        '  fi',
-        'fi',
-        '',
-        'echo \'{}\'  | "$HOME/.claude/statusline.sh"',
-      ].join('\n') + '\n';
+    // Bump WRAPPER_VERSION whenever the wrapper template below changes so
+    // existing installs get re-provisioned with the latest logic.
+    const WRAPPER_VERSION = 2;
+    const WRAPPER_MARKER = 'managed-by:claude-code-insights-statusline';
+    const wrapper = [
+      '#!/usr/bin/env bash',
+      `# ${WRAPPER_MARKER}:${WRAPPER_VERSION}`,
+      '# Claude Code statusline - reads per-session metrics from collector socket,',
+      '# falls back to extension cache. Claude Code passes a live status payload on',
+      '# stdin whose .model reflects the CURRENT model (it changes mid-session), so',
+      '# the stdin model always overrides the collector/cache snapshot.',
+      '',
+      'input="$(cat)"',
+      'cc_model="$(jq -c \'.model // null\' <<<"$input" 2>/dev/null)"',
+      '[ -z "$cc_model" ] && cc_model="null"',
+      '',
+      'COLLECTOR_SOCK="${XDG_STATE_HOME:-$HOME/.local/state}/claude-warden/collector.sock"',
+      'SESSION_ID="${CLAUDE_SESSION_ID:-}"',
+      '',
+      'if [ -n "$SESSION_ID" ] && [ -S "$COLLECTOR_SOCK" ]; then',
+      '  session_json=$(curl -sf --max-time 0.05 \\',
+      '    --unix-socket "$COLLECTOR_SOCK" \\',
+      '    "http://localhost/v1/sessions/${SESSION_ID}/context" 2>/dev/null)',
+      '  if [ -n "$session_json" ]; then',
+      '    output=$(jq -c --argjson ccm "$cc_model" \'{ session_id: "\'"$SESSION_ID"\'", model: ($ccm // { id: (.model.id // "claude-sonnet-4-6"), display_name: (.model.display_name // "Sonnet 4.6") }), context_window: { context_window_size: (.context_window_size // 200000), total_input_tokens: ((.input_tokens // 0) + (.cache_read_tokens // 0) + (.cache_creation_tokens // 0)), total_output_tokens: 0, used_percentage: (.used_pct // 0) }, tool_count: (.tool_count // 0) }\' <<<"$session_json" 2>/dev/null)',
+      '    if [ -n "$output" ] && [ "$output" != "null" ]; then',
+      '      echo "$output" | "$HOME/.claude/statusline.sh"',
+      '      exit 0',
+      '    fi',
+      '  fi',
+      'fi',
+      '',
+      'usage_cache="$HOME/.claude/claude-code-insights-cache.json"',
+      'if [ -f "$usage_cache" ]; then',
+      '  output=$(jq -c --argjson ccm "$cc_model" \'{ session_id: (.session.session_id // ""), model: ($ccm // .session.model // {id: "claude-sonnet-4-6", display_name: "Sonnet 4.6"}), context_window: (.session.context_window // {context_window_size: 200000, used_percentage: 0}), tool_count: (.session.tool_count // 0) }\' <"$usage_cache" 2>/dev/null)',
+      '  if [ -n "$output" ] && [ "$output" != "null" ]; then',
+      '    echo "$output" | "$HOME/.claude/statusline.sh"',
+      '    exit 0',
+      '  fi',
+      'fi',
+      '',
+      '# Last resort: pass Claude Code\'s own payload through — it has the live model.',
+      'if [ -n "$input" ]; then echo "$input" | "$HOME/.claude/statusline.sh"; else echo \'{}\' | "$HOME/.claude/statusline.sh"; fi',
+    ].join('\n') + '\n';
+
+    // Write if missing, or if the existing file is an older extension-managed
+    // wrapper. Leave hand-customized wrappers (no marker) untouched.
+    let shouldWrite = !fs.existsSync(wrapperPath);
+    if (!shouldWrite) {
+      try {
+        const existing = fs.readFileSync(wrapperPath, 'utf-8');
+        const m = existing.match(new RegExp(WRAPPER_MARKER + ':(\\d+)'));
+        const isLegacyManaged = existing.includes('reads per-session metrics from collector socket');
+        if (m) {
+          shouldWrite = parseInt(m[1], 10) < WRAPPER_VERSION;
+        } else if (isLegacyManaged) {
+          // Pre-marker extension wrapper (e.g. the one that discarded stdin) — upgrade it.
+          shouldWrite = true;
+        }
+      } catch { /* unreadable — leave alone */ }
+    }
+    if (shouldWrite) {
       fs.writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
     }
 
-    // Wire into settings.json if the statusline command key is absent or wrong
+    // Wire into settings.json (statusline command) and migrate away stale hooks
+    // this extension registered in older versions.
     if (fs.existsSync(settingsPath)) {
       try {
         const raw = fs.readFileSync(settingsPath, 'utf-8');
         const settings = JSON.parse(raw);
+        let dirty = false;
+
         const currentCmd: string = settings?.statusline?.command ?? '';
         if (!currentCmd.includes('statusline')) {
           settings.statusline = { ...(settings.statusline ?? {}), command: '$HOME/.claude/statusline-wrapper.sh' };
-          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+          dirty = true;
+        }
+
+        // MIGRATION: a previous version registered a PreToolUse Bash hook pointing
+        // at permission-proxy.sh as part of the (now removed) approval system. With
+        // no extension UI to answer it, background agents block until the hook's
+        // long timeout. Strip any PreToolUse entry referencing permission-proxy.
+        if (removeStalePermissionProxyHook(settings)) {
+          dirty = true;
+        }
+
+        if (dirty) {
+          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
         }
       } catch { /* malformed settings.json — leave it alone */ }
     } else {
