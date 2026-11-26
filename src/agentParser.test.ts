@@ -662,6 +662,11 @@ describe('getTasksDir', () => {
     expect(dir).toContain(originalKey);
   });
 
+  it('pathToProjectKey handles Windows paths (backslashes, drive letter casing)', () => {
+    expect(pathToProjectKey('I:\\Development\\dev-pipeline')).toBe('I--Development-dev-pipeline');
+    expect(pathToProjectKey('i:\\Development\\dev-pipeline')).toBe('I--Development-dev-pipeline');
+  });
+
   it('pathToProjectKey replaces both slashes and dots', () => {
     // Claude Code replaces both / and . with - in project keys
     // e.g. /Users/juan.cruz/workspaces/project → -Users-juan-cruz-workspaces-project

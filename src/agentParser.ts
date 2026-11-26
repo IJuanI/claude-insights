@@ -111,7 +111,9 @@ export interface AgentTask {
 
 /** Convert a filesystem path to Claude Code's project key format (replace / and . with -) */
 export function pathToProjectKey(p: string): string {
-  return p.replace(/[/.]/g, '-');
+  // Claude Code replaces every non-alphanumeric char. On Windows VS Code reports
+  // the drive letter lower-case ('i:\\foo') but keys use the real case ('I--foo').
+  return p.replace(/^[a-z]:/, m => m.toUpperCase()).replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 /**
@@ -1429,7 +1431,7 @@ export function reconstructWsPath(key: string): string {
   // matching, then use the real home path for filesystem reconstruction.
   const home = os.homedir();
   // Normalize: replace '/' and '.' with '-' to match Claude Code's key format.
-  const homePrefixNorm = home.replace(/[/.]/g, '-');
+  const homePrefixNorm = pathToProjectKey(home);
   // Also normalize the key for comparison (it already has '-' for '/').
   const keyNorm = key.replace(/\./g, '-');
 
